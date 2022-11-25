@@ -1,14 +1,17 @@
 locals {
-  kubernetes_cluster_orchestrator_version                    = var.kubernetes_cluster_orchestrator_version == null ? data.azurerm_kubernetes_service_versions.main.latest_version : var.kubernetes_cluster_orchestrator_version
-  kubernetes_cluster_default_node_pool_orchestrator_version  = var.kubernetes_cluster_default_node_pool_orchestrator_version == null ? local.kubernetes_cluster_orchestrator_version : var.kubernetes_cluster_default_node_pool_orchestrator_version
-  kubernetes_cluster_workload_node_pool_orchestrator_version = var.kubernetes_cluster_workload_node_pool_orchestrator_version == null ? local.kubernetes_cluster_orchestrator_version : var.kubernetes_cluster_workload_node_pool_orchestrator_version
+  subnets = [
+    azurerm_subnet.cluster.id
+  ]
+  kubernetes_cluster_orchestrator_version                   = var.kubernetes_cluster_orchestrator_version == null ? data.azurerm_kubernetes_service_versions.main.latest_version : var.kubernetes_cluster_orchestrator_version
+  kubernetes_cluster_default_node_pool_orchestrator_version = var.kubernetes_cluster_default_node_pool_orchestrator_version == null ? local.kubernetes_cluster_orchestrator_version : var.kubernetes_cluster_default_node_pool_orchestrator_version
+  kubernetes_cluster_node_pool_orchestrator_version         = { for k, v in var.kubernetes_cluster_node_pools : k => v.orchestrator_version == null ? local.kubernetes_cluster_orchestrator_version : v.orchestrator_version }
 }
 
 resource "azurerm_kubernetes_cluster" "main" {
-  name                              = "aks-${local.context_name}"
+  name                              = "aks-${local.global_resource_suffix}"
   location                          = azurerm_resource_group.main.location
   resource_group_name               = azurerm_resource_group.main.name
-  dns_prefix                        = local.context_name
+  dns_prefix                        = local.global_resource_suffix
   automatic_channel_upgrade         = var.kubernetes_cluster_automatic_channel_upgrade
   role_based_access_control_enabled = true
   azure_policy_enabled              = var.kubernetes_cluster_azure_policy_enabled
@@ -37,6 +40,7 @@ resource "azurerm_kubernetes_cluster" "main" {
     max_count                    = var.kubernetes_cluster_default_node_pool_max_count
     max_pods                     = var.kubernetes_cluster_default_node_pool_max_pods
     os_disk_size_gb              = var.kubernetes_cluster_default_node_pool_os_disk_size_gb
+    os_disk_type                 = var.kubernetes_cluster_default_node_pool_os_disk_type
     os_sku                       = var.kubernetes_cluster_default_node_pool_os_sku
     orchestrator_version         = local.kubernetes_cluster_default_node_pool_orchestrator_version
     only_critical_addons_enabled = true
@@ -79,23 +83,26 @@ resource "azurerm_kubernetes_cluster" "main" {
 }
 
 resource "azurerm_kubernetes_cluster_node_pool" "main" {
-  name                  = "workload"
+  for_each              = var.kubernetes_cluster_node_pools
+  name                  = each.key
   kubernetes_cluster_id = azurerm_kubernetes_cluster.main.id
-  vm_size               = var.kubernetes_cluster_workload_node_pool_vm_size
+  vm_size               = each.value.vm_size
   enable_auto_scaling   = true
-  min_count             = var.kubernetes_cluster_workload_node_pool_min_count
-  max_count             = var.kubernetes_cluster_workload_node_pool_max_count
-  max_pods              = var.kubernetes_cluster_workload_node_pool_max_pods
-  os_disk_size_gb       = var.kubernetes_cluster_workload_node_pool_os_disk_size_gb
-  os_sku                = var.kubernetes_cluster_workload_node_pool_os_sku
-  orchestrator_version  = local.kubernetes_cluster_workload_node_pool_orchestrator_version
+  min_count             = each.value.min_count
+  max_count             = each.value.max_count
+  max_pods              = each.value.max_pods
+  os_disk_size_gb       = each.value.os_disk_size_gb
+  os_disk_type          = each.value.os_disk_type
+  os_sku                = each.value.os_sku
+  os_type               = each.value.os_type
+  orchestrator_version  = local.kubernetes_cluster_node_pool_orchestrator_version[each.key]
   vnet_subnet_id        = azurerm_subnet.cluster.id
-  zones                 = var.kubernetes_cluster_workload_node_pool_availability_zones
-  node_labels           = var.kubernetes_cluster_workload_node_pool_labels
-  node_taints           = var.kubernetes_cluster_workload_node_pool_taints
+  zones                 = each.value.zones
+  node_labels           = each.value.node_labels
+  node_taints           = each.value.node_taints
 
   upgrade_settings {
-    max_surge = var.kubernetes_cluster_workload_node_pool_max_surge
+    max_surge = each.value.max_surge
   }
 }
 
@@ -105,7 +112,7 @@ resource "azurerm_role_assignment" "cluster_network_contributor" {
   principal_id         = azurerm_kubernetes_cluster.main.identity.0.principal_id
 }
 
-resource "azurerm_role_assignment" "registry_pull" {
+resource "azurerm_role_assignment" "cluster_registry_pull" {
   role_definition_name = "AcrPull"
   scope                = azurerm_container_registry.main.id
   principal_id         = azurerm_kubernetes_cluster.main.kubelet_identity[0].object_id
@@ -127,35 +134,35 @@ resource "azurerm_role_assignment" "aks_cluster_administrator" {
   scope                = azurerm_kubernetes_cluster.main.id
 }
 
-resource "azurerm_role_assignment" "aks_cluster_user" {
+resource "azurerm_role_assignment" "kubernetes_service_cluster_user" {
   for_each             = toset(var.kubernetes_service_cluster_users)
   role_definition_name = "Azure Kubernetes Service Cluster User Role"
   principal_id         = each.value
   scope                = azurerm_kubernetes_cluster.main.id
 }
 
-resource "azurerm_role_assignment" "aks_rbac_administrator" {
+resource "azurerm_role_assignment" "kubernetes_service_rbac_administrator" {
   for_each             = toset(var.kubernetes_service_rbac_administrators)
   role_definition_name = "Azure Kubernetes Service RBAC Admin"
   principal_id         = each.value
   scope                = azurerm_kubernetes_cluster.main.id
 }
 
-resource "azurerm_role_assignment" "aks_rbac_cluster_administrator" {
+resource "azurerm_role_assignment" "kubernetes_service_rbac_cluster_administrator" {
   for_each             = toset(var.kubernetes_service_rbac_cluster_administrators)
   role_definition_name = "Azure Kubernetes Service RBAC Cluster Admin"
   principal_id         = each.value
   scope                = azurerm_kubernetes_cluster.main.id
 }
 
-resource "azurerm_role_assignment" "aks_rbac_reader" {
+resource "azurerm_role_assignment" "kubernetes_service_rbac_reader" {
   for_each             = toset(var.kubernetes_service_rbac_readers)
   role_definition_name = "Azure Kubernetes Service RBAC Reader"
   principal_id         = each.value
   scope                = azurerm_kubernetes_cluster.main.id
 }
 
-resource "azurerm_role_assignment" "aks_rbac_writer" {
+resource "azurerm_role_assignment" "kubernetes_service_rbac_writer" {
   for_each             = toset(var.kubernetes_service_rbac_writers)
   role_definition_name = "Azure Kubernetes Service RBAC Writer"
   principal_id         = each.value
