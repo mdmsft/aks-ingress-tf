@@ -112,18 +112,15 @@ resource "azurerm_role_assignment" "cluster_network_contributor" {
   principal_id         = azurerm_kubernetes_cluster.main.identity.0.principal_id
 }
 
-resource "azurerm_role_assignment" "cluster_registry_pull" {
-  role_definition_name = "AcrPull"
-  scope                = azurerm_container_registry.main.id
-  principal_id         = azurerm_kubernetes_cluster.main.kubelet_identity[0].object_id
-}
+resource "local_file" "kube_config" {
+  filename = ".kube/config"
+  content  = azurerm_kubernetes_cluster.main.kube_config_raw
 
-resource "null_resource" "kube_config" {
-  triggers = {
-    cluster = azurerm_kubernetes_cluster.main.id
-  }
   provisioner "local-exec" {
-    command = "echo \"${azurerm_kubernetes_cluster.main.kube_config_raw}\" | tee .kubeconfig"
+    command = "kubelogin convert-kubeconfig -l spn --client-id ${var.client_id} --client-secret ${var.client_secret}"
+    environment = {
+      KUBECONFIG = ".kube/config"
+    }
   }
 }
 
@@ -149,7 +146,7 @@ resource "azurerm_role_assignment" "kubernetes_service_rbac_administrator" {
 }
 
 resource "azurerm_role_assignment" "kubernetes_service_rbac_cluster_administrator" {
-  for_each             = toset(var.kubernetes_service_rbac_cluster_administrators)
+  for_each             = toset(concat([data.azurerm_client_config.main.object_id], var.kubernetes_service_rbac_cluster_administrators))
   role_definition_name = "Azure Kubernetes Service RBAC Cluster Admin"
   principal_id         = each.value
   scope                = azurerm_kubernetes_cluster.main.id
@@ -167,4 +164,24 @@ resource "azurerm_role_assignment" "kubernetes_service_rbac_writer" {
   role_definition_name = "Azure Kubernetes Service RBAC Writer"
   principal_id         = each.value
   scope                = azurerm_kubernetes_cluster.main.id
+}
+
+resource "helm_release" "nginx" {
+  name             = "ingress-nginx"
+  repository       = "https://kubernetes.github.io/ingress-nginx"
+  chart            = "ingress-nginx"
+  namespace        = "ingress-nginx"
+  create_namespace = true
+  cleanup_on_fail  = true
+  atomic           = true
+  wait             = true
+
+  values = [
+    templatefile("./k8s/nginx.values.yaml", { load_balancer_ip = local.load_balancer_ip_address, load_balancer_subnet = azurerm_subnet.cluster.name })
+  ]
+
+  depends_on = [
+    azurerm_role_assignment.kubernetes_service_rbac_cluster_administrator,
+    local_file.kube_config
+  ]
 }

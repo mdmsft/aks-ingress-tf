@@ -1,0 +1,7 @@
+controller:
+  service:
+    annotations:
+      service.beta.kubernetes.io/azure-load-balancer-internal: "true"
+      service.beta.kubernetes.io/azure-load-balancer-internal-subnet: "${load_balancer_subnet}"
+    externalTrafficPolicy: Local
+    loadBalancerIP: ${load_balancer_ip}

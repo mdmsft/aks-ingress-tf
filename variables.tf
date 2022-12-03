@@ -26,9 +26,24 @@ variable "tags" {
   }
 }
 
+variable "client_id" {
+  type = string
+}
+
+variable "client_secret" {
+  type      = string
+  sensitive = true
+}
+
 variable "address_space" {
-  type    = string
-  default = "172.16.0.0/16"
+  type = list(string)
+  default = [
+    "172.16.0.0/16",
+    "172.17.0.0/24",
+    "172.17.1.0/24",
+    "172.17.2.0/24",
+    "172.17.3.0/24",
+  ]
 }
 
 variable "kubernetes_service_versions_include_preview" {
@@ -69,7 +84,7 @@ variable "kubernetes_cluster_docker_bridge_cidr" {
 
 variable "kubernetes_cluster_default_node_pool_vm_size" {
   type    = string
-  default = "Standard_D2s_v5"
+  default = "Standard_D2d_v5"
 }
 
 variable "kubernetes_cluster_default_node_pool_max_pods" {
@@ -198,11 +213,6 @@ variable "log_analytics_workspace_retention_in_days" {
   default = 30
 }
 
-variable "container_registry_sku" {
-  type    = string
-  default = "Basic"
-}
-
 variable "nat_gateway_public_ip_prefix_length" {
   type    = number
   default = 28
@@ -236,4 +246,36 @@ variable "kubernetes_service_rbac_readers" {
 variable "kubernetes_service_rbac_writers" {
   type    = list(string)
   default = []
+}
+
+variable "ssl_certificate_key_vault_id" {
+  type = string
+}
+
+variable "ssl_certificate_name" {
+  type = string
+}
+
+variable "application_gateway_min_capacity" {
+  type    = number
+  default = 0
+}
+
+variable "application_gateway_max_capacity" {
+  type    = number
+  default = 9
+}
+
+variable "dns_zone_id" {
+  type = string
+}
+
+variable "api_additional_locations" {
+  type    = list(string)
+  default = []
+}
+
+variable "api_capacity" {
+  type    = number
+  default = 1
 }
